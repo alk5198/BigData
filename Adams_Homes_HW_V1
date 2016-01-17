@@ -1,0 +1,164 @@
+##### ******** Mortgage and Home Sales Data ******** #####
+
+## Read in the data
+setwd("C:/Users/Adam/Desktop/Big Data")
+homes <- read.csv("homes2004.csv")
+
+###AK Checking data
+head(homes)
+str(homes)
+summary(homes)
+
+homes$ZINC2[homes$ZINC2<0]  ##Checking where income is negative
+homes[homes$AMMORT>(homes$LPRICE+250000),c("AMMORT","LPRICE","VALUE","FRSTHO","MATBUY","DWNPAY")]
+
+###Cleaning the data
+cleanhomes <- subset(homes, homes$AMMORT<(homes$LPRICE+250000)) ###Removing where mortgage is $250k greater than price bought
+cleanhomes2 <- subset(cleanhomes, cleanhomes$ZINC2>0)           ###Removing negative household incomes
+cleanhomes3 <- subset(cleanhomes2, cleanhomes2$LPRICE>1000)     ###Removing price paid less than $1k
+cleanhomes4 <- subset(cleanhomes3, cleanhomes3$VALUE>1000)      ###Removing market values less than $1K
+homes <- cleanhomes4
+
+###AK Checking data
+head(homes)
+str(homes)
+summary(homes)
+
+
+# conditional vs marginal value
+par(mfrow=c(1,2)) # 1 row, 2 columns of plots 
+hist(homes$VALUE, col="grey", xlab="home value", main="")
+plot(VALUE ~ factor(BATHS), 
+     col=rainbow(8), data=homes[homes$BATHS<8,],
+     xlab="number of bathrooms", ylab="home value")
+
+# create a var for downpayment being greater than 20%
+homes$gt20dwn <- 
+  factor(0.2<(homes$LPRICE-homes$AMMORT)/homes$LPRICE)
+
+# some quick plots.  Do more to build your intuition!
+par(mfrow=c(1,2)) 
+plot(VALUE ~ STATE, data=homes, 
+     col=rainbow(nlevels(homes$STATE)), 
+     ylim=c(0,10^6), cex.axis=.65)
+plot(gt20dwn ~ FRSTHO, data=homes, 
+     col=c(1,3), xlab="Buyer's First Home?", 
+     ylab="Greater than 20% down")
+
+###  AK write code breaking down income into 4 levels and checking versus greater than 20% down via plot
+
+
+
+##AK Plots
+
+plot(gt20dwn ~ BATHS, data=homes, 
+     col=c(1,3), xlab="# of baths", 
+     ylab="Greater than 20% down")
+plot(gt20dwn ~ BEDRMS, data=homes, 
+     col=c(1,4), xlab="# of bedrooms", 
+     ylab="Greater than 20% down")
+
+plot(homes$BEDRMS,homes$BATHS, col=c(3))
+
+plot(log(LPRICE) ~ log(VALUE), data=homes, col="red")
+
+## code hints 
+
+## Q2 
+# regress log(VALUE) on everything except AMMORT and LPRICE 
+pricey <- glm(log(VALUE) ~ .-AMMORT-LPRICE, data=homes)
+# extract pvalues
+pvals <- summary(pricey)$coef[-1,4]
+# example: those variable insignificant at alpha=0.2
+names(pvals)[pvals>.2]
+# you'll want to replace .2 with your FDR cutoff
+# you can use the `-AMMORT' type syntax to drop variables
+
+summary(pricey)
+1 - (pricey$deviance/pricey$null.deviance)  ## Gives you R squared of 0.599
+
+##AK TIME 
+
+##How many coefficients are significant at the 10% level?
+
+source("fdr.R")
+cutoff10 <- fdr_cut(pvals,q=.1, plotit=TRUE)
+print(cutoff10)
+names(pvals)[pvals>cutoff10]
+print(sum(pvals<=cutoff10)) ##Answer = 35 significant variables
+
+names(pvals[pvals<=cutoff10])
+
+names(pvals)[pvals>cutoff10] ##Variables to remove
+
+
+
+## Re-running with only significant variables
+
+pricey2 <-glm(log(VALUE) ~ .-AMMORT-LPRICE-EGREEN-ETRANS-ODORA-PER-ZADULT-NUNITS, data=homes) 
+
+1 - (pricey2$deviance/pricey2$null.deviance)  ## Gives you R squared of 0.599 . Same as prior!!
+
+
+## Q3: 
+# - don't forget family="binomial"!
+# - use +A*B in forumula to add A interacting with B
+
+fit <- glm(gt20dwn ~ .-AMMORT-LPRICE, data=homes, family="binomial")
+
+##AK Interpretting
+
+b <- coef(fit)
+exp(b["BATHS"])  ### 1.27 = odds muliplier. As you add a bathroom the odds that you have greater than 20% down increase by * 1.27
+exp(b["FRSTHOY"]) ### 0.69 = odds multiplier. or odds drop by 1-0.69 = 0.30
+
+##AK adding interactions
+
+interact <- glm(gt20dwn ~ .-AMMORT-LPRICE+FRSTHO*BATHS, data=homes, family="binomial")
+
+c <- coef(interact)
+levels(homes$FRSTHO) ## to check to see which is first. No is the default
+
+d <- exp(c["BATHS"]) ## Odds multiplier when NOT first home is 1.34 
+e <- exp(c["BATHS"]) + exp(c["BATHS:FRSTHOY"]) ##Odds multuplier when IT IS first home is 2.15
+
+trial <- matrix(c(d,e), ncol=1)
+rownames(trial) <- c("Baths Multiplier")
+colnames(trial) <- c("Not First Home", "First Home")
+trial
+
+## Q4
+# this is your training sample
+gt100 <- which(homes$VALUE>1e5) ##Training data with homes greater than 100k
+
+##AK Checking to see if accurate
+length(gt100) ##This equals 12,010 amount of homes greater than 100k
+length(homes$VALUE[homes$VALUE>100000]) ## Also equals 12,010 WE ARE GOOD
+
+# ybar and null deviance
+source("deviance.R")
+
+ybar <- mean(homes$gt20dwn[-gt100]==TRUE)
+D0 <- deviance(y=homes$gt20dwn[-gt100], pred=ybar, family="binomial")
+
+##AK TIME :) 
+
+fit2 <- glm(gt20dwn ~ .-AMMORT-LPRICE, data=homes[+gt100,], family="binomial") ##fit with homes over 100k
+summary(fit2)
+
+1 - (fit2$deviance/fit2$null.deviance)  ## Gives you R squared of 0.107 . 
+
+##Now lets predict homes less than 100k
+phomes <- predict(fit2, newdata=homes[-gt100,],type="response")
+
+
+D <- deviance(y=homes$gt20dwn[-gt100], pred=phomes, family="binomial")
+
+# plot the OOS fit
+plot(phomes ~ homes$VALUE[-gt100],
+     xlab="", ylab=c("predicted probability of >20% down"), 
+     col=c("navy","red"))
+
+## OOS R2
+1 - D/D0   ##Gives you R2 of out of sample .029 lower than the .107 as you would expect
+
